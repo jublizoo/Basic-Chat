@@ -2,13 +2,19 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/gorilla/websocket"
 )
+
+type Request struct {
+	Name string
+}
+
+type Response struct {
+	Id string
+}
 
 func get_port(scanner *bufio.Scanner) int {
 	for scanner.Scan() {
@@ -30,64 +36,28 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
-func serveWs(w http.ResponseWriter, r *http.Request) {
+func serveWs(clients *Client_list, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	for {
-		_, message, err := conn.ReadMessage()
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		fmt.Println(string(message))
-		resp := Response{Id: "12345"}
-		err = conn.WriteJSON(resp)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-	}
-}
 
-func handler(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	var msg Request
-	json.Unmarshal(body, &msg)
-
-	response := Response{
-		Id: fmt.Sprintf("recieved: %s", msg.Name),
-	}
-	response_str, _ := json.Marshal(response)
-	w.Header().Set("Content-Type", "application/json")
-	_, err = w.Write(response_str)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-}
-
-type Request struct {
-	Name string
-}
-
-type Response struct {
-	Id string
+	id := r.PathValue("username")
+	clients.create_client(conn, id)
 }
 
 func main() {
 	// scanner := bufio.NewScanner(os.Stdin)
 	// port := get_port(scanner)
+	clients := initializeClients()
+	clients.serve_clients()
+	serveWsWrapper := func(w http.ResponseWriter, r *http.Request) {
+		serveWs(clients, w, r)
+	}
 
 	router := http.NewServeMux()
-	router.HandleFunc("/", handler)
-	router.HandleFunc("/ws", serveWs)
+	router.HandleFunc("GET /ws/{username}", serveWsWrapper)
 
 	server := http.Server{
 		Addr:    ":8080",
